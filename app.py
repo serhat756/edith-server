@@ -1,168 +1,82 @@
 from flask import Flask, request, jsonify
 from werkzeug.security import generate_password_hash, check_password_hash
-import sqlite3
 import uuid
 import datetime
 
 app = Flask(__name__)
-DB_FILE = "edith.db"
 
-def init_db():
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS users (
-                    id TEXT PRIMARY KEY,
-                    email TEXT UNIQUE,
-                    username TEXT,
-                    password TEXT
-                )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS messages (
-                    id TEXT PRIMARY KEY,
-                    sender_id TEXT,
-                    receiver_id TEXT,
-                    text TEXT,
-                    time TEXT,
-                    status TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )''')
-    conn.commit()
-    conn.close()
-
-init_db()
+users = []
+messages = []
 
 @app.route('/')
-def home():
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("SELECT COUNT(*) FROM users")
-    u_count = c.fetchone()[0]
-    c.execute("SELECT COUNT(*) FROM messages")
-    m_count = c.fetchone()[0]
-    conn.close()
-    return jsonify({
-        "status": "EDITH Auth & Chat Server Aktif (SQLite)",
-        "users_count": u_count,
-        "messages_count": m_count
-    })
+def index():
+    return jsonify({"status": "OK", "users": len(users), "messages": len(messages)})
 
 @app.route('/api/register', methods=['POST'])
 def register():
-    data = request.get_json() or {}
-    email = data.get('email', '').strip().lower()
-    username = data.get('username', '').strip()
-    password = data.get('password', '')
+    d = request.get_json(force=True) or {}
+    email = d.get('email', '').strip().lower()
+    username = d.get('username', '').strip()
+    password = d.get('password', '')
 
-    if not email or not username or not password:
-        return jsonify({"status": "error", "message": "Tum alanlari doldurun."}), 400
+    if any(u['email'] == email for u in users):
+        return jsonify({"status": "error", "message": "E-posta kayitli"}), 400
 
-    new_id = str(uuid.uuid4())
-    pw_hash = generate_password_hash(password)
-
-    try:
-        conn = sqlite3.connect(DB_FILE)
-        c = conn.cursor()
-        c.execute("INSERT INTO users (id, email, username, password) VALUES (?, ?, ?, ?)",
-                  (new_id, email, username, pw_hash))
-        conn.commit()
-        conn.close()
-        return jsonify({"status": "success", "message": "Kayit basarili."}), 201
-    except sqlite3.IntegrityError:
-        return jsonify({"status": "error", "message": "Bu e-posta zaten kayitli."}), 400
+    uid = str(uuid.uuid4())
+    users.append({
+        "id": uid,
+        "email": email,
+        "username": username,
+        "password": generate_password_hash(password)
+    })
+    return jsonify({"status": "success", "id": uid}), 201
 
 @app.route('/api/login', methods=['POST'])
 def login():
-    data = request.get_json() or {}
-    email = data.get('email', '').strip().lower()
-    password = data.get('password', '')
+    d = request.get_json(force=True) or {}
+    email = d.get('email', '').strip().lower()
+    password = d.get('password', '')
 
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("SELECT id, username, email, password FROM users WHERE email = ?", (email,))
-    user = c.fetchone()
-    conn.close()
-
-    if not user or not check_password_hash(user[3], password):
-        return jsonify({"status": "error", "message": "Hatali e-posta veya sifre."}), 401
+    user = next((u for u in users if u['email'] == email), None)
+    if not user or not check_password_hash(user['password'], password):
+        return jsonify({"status": "error", "message": "Hatali giris"}), 401
 
     return jsonify({
         "status": "success",
-        "user": {
-            "id": user[0],
-            "username": user[1],
-            "email": user[2]
-        }
+        "user": {"id": user["id"], "username": user["username"], "email": user["email"]}
     }), 200
 
 @app.route('/api/users', methods=['GET'])
 def get_users():
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("SELECT id, username, email FROM users")
-    rows = c.fetchall()
-    conn.close()
-
-    users = [{"id": r[0], "username": r[1], "email": r[2]} for r in rows]
-    return jsonify({"status": "success", "users": users}), 200
+    return jsonify({"users": [{"id": u["id"], "username": u["username"], "email": u["email"]} for u in users]}), 200
 
 @app.route('/api/send_message', methods=['POST'])
 def send_message():
-    data = request.get_json() or {}
-    sender_id = data.get('sender_id')
-    receiver_id = data.get('receiver_id')
-    text = data.get('text', '').strip()
+    d = request.get_json(force=True) or {}
+    s = d.get('sender_id')
+    r = d.get('receiver_id')
+    t = d.get('text')
+    
+    if not s or not r or not t:
+        return jsonify({"status": "error"}), 400
 
-    if not sender_id or not receiver_id or not text:
-        return jsonify({"status": "error", "message": "Gecersiz mesaj verisi."}), 400
-
-    msg_id = str(uuid.uuid4())
-    msg_time = datetime.datetime.now().strftime("%H:%M")
-
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("INSERT INTO messages (id, sender_id, receiver_id, text, time, status) VALUES (?, ?, ?, ?, ?, ?)",
-              (msg_id, sender_id, receiver_id, text, msg_time, "delivered"))
-    conn.commit()
-    conn.close()
-
-    return jsonify({
-        "status": "success",
-        "message": {
-            "id": msg_id,
-            "sender_id": sender_id,
-            "receiver_id": receiver_id,
-            "text": text,
-            "time": msg_time,
-            "status": "delivered"
-        }
-    }), 201
+    msg = {
+        "id": str(uuid.uuid4()),
+        "sender_id": s,
+        "receiver_id": r,
+        "text": t,
+        "time": datetime.datetime.now().strftime("%H:%M")
+    }
+    messages.append(msg)
+    return jsonify({"status": "success", "message": msg}), 201
 
 @app.route('/api/get_messages', methods=['GET'])
 def get_messages():
-    user1 = request.args.get('user1')
-    user2 = request.args.get('user2')
-
-    if not user1 or not user2:
-        return jsonify({"status": "error", "message": "ID eksik."}), 400
-
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    # Karşıdan bana gelen mesajları okundu yap
-    c.execute("UPDATE messages SET status = 'read' WHERE sender_id = ? AND receiver_id = ?", (user2, user1))
-    conn.commit()
-
-    # İki kişi arasındaki tüm mesajları sıralı çek
-    c.execute("""SELECT id, sender_id, receiver_id, text, time, status 
-                 FROM messages 
-                 WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
-                 ORDER BY created_at ASC""", (user1, user2, user2, user1))
-    rows = c.fetchall()
-    conn.close()
-
-    messages = [
-        {"id": r[0], "sender_id": r[1], "receiver_id": r[2], "text": r[3], "time": r[4], "status": r[5]}
-        for r in rows
-    ]
-    return jsonify({"status": "success", "messages": messages}), 200
+    u1 = request.args.get('user1')
+    u2 = request.args.get('user2')
+    
+    conv = [m for m in messages if (m['sender_id'] == u1 and m['receiver_id'] == u2) or (m['sender_id'] == u2 and m['receiver_id'] == u1)]
+    return jsonify({"messages": conv}), 200
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
