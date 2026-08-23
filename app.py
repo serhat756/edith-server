@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify
 from werkzeug.security import generate_password_hash, check_password_hash
 import uuid
-import time
+import datetime
 
 app = Flask(__name__)
 
@@ -19,13 +19,13 @@ def home():
 
 @app.route('/api/register', methods=['POST'])
 def register():
-    data = request.get_json()
-    if not data or not data.get('email') or not data.get('password') or not data.get('username'):
-        return jsonify({"status": "error", "message": "Tum alanlari doldurun."}), 400
+    data = request.get_json() or {}
+    email = data.get('email', '').strip().lower()
+    username = data.get('username', '').strip()
+    password = data.get('password', '')
 
-    email = data['email'].strip().lower()
-    username = data['username'].strip()
-    password = data['password']
+    if not email or not username or not password:
+        return jsonify({"status": "error", "message": "Tum alanlari doldurun."}), 400
 
     if email in users_db:
         return jsonify({"status": "error", "message": "Bu e-posta zaten kayitli."}), 400
@@ -38,16 +38,13 @@ def register():
         "password_hash": generate_password_hash(password)
     }
 
-    return jsonify({"status": "success", "message": "Kayit basarili. Giris yapabilirsiniz."}), 201
+    return jsonify({"status": "success", "message": "Kayit basarili."}), 201
 
 @app.route('/api/login', methods=['POST'])
 def login():
-    data = request.get_json()
-    if not data or not data.get('email') or not data.get('password'):
-        return jsonify({"status": "error", "message": "E-posta ve sifre gereklidir."}), 400
-
-    email = data['email'].strip().lower()
-    password = data['password']
+    data = request.get_json() or {}
+    email = data.get('email', '').strip().lower()
+    password = data.get('password', '')
 
     user = users_db.get(email)
     if not user or not check_password_hash(user['password_hash'], password):
@@ -58,7 +55,6 @@ def login():
 
     return jsonify({
         "status": "success",
-        "message": "Giris basarili.",
         "token": session_token,
         "user": {
             "id": user['user_id'],
@@ -77,20 +73,22 @@ def get_users():
 
 @app.route('/api/send_message', methods=['POST'])
 def send_message():
-    data = request.get_json()
+    data = request.get_json() or {}
     sender_id = data.get('sender_id')
     receiver_id = data.get('receiver_id')
     text = data.get('text', '').strip()
 
     if not sender_id or not receiver_id or not text:
-        return jsonify({"status": "error", "message": "Gecersiz mesaj parametreleri."}), 400
+        return jsonify({"status": "error", "message": "Gecersiz mesaj."}), 400
 
+    now = datetime.datetime.now()
     msg = {
         "id": str(uuid.uuid4()),
         "sender_id": sender_id,
         "receiver_id": receiver_id,
         "text": text,
-        "timestamp": int(time.time())
+        "time": now.strftime("%H:%M"),
+        "status": "delivered"  # sent, delivered, read
     }
     messages_db.append(msg)
     return jsonify({"status": "success", "message": msg}), 201
@@ -101,7 +99,12 @@ def get_messages():
     user2 = request.args.get('user2')
 
     if not user1 or not user2:
-        return jsonify({"status": "error", "message": "Kullanici ID'leri eksik."}), 400
+        return jsonify({"status": "error", "message": "ID eksik."}), 400
+
+    # user2'nin user1'e attığı mesajları 'okundu' (read) yap
+    for m in messages_db:
+        if m['sender_id'] == user2 and m['receiver_id'] == user1:
+            m['status'] = 'read'
 
     conversation = [
         m for m in messages_db
