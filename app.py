@@ -20,13 +20,13 @@ def register():
     password = d.get('password', '')
 
     if any(u['email'] == email for u in users):
-        return jsonify({"status": "error", "message": "E-posta kayitli"}), 400
+        return jsonify({"status": "error", "message": "Bu e-posta zaten kayitli"}), 400
 
     uid = str(uuid.uuid4())
     users.append({
         "id": uid,
         "email": email,
-        "username": username,
+        "username": username if username else email.split('@')[0],
         "password": generate_password_hash(password)
     })
     return jsonify({"status": "success", "id": uid}), 201
@@ -39,7 +39,7 @@ def login():
 
     user = next((u for u in users if u['email'] == email), None)
     if not user or not check_password_hash(user['password'], password):
-        return jsonify({"status": "error", "message": "Hatali giris"}), 401
+        return jsonify({"status": "error", "message": "Hatali e-posta veya sifre"}), 401
 
     return jsonify({
         "status": "success",
@@ -56,6 +56,7 @@ def send_message():
     s = d.get('sender_id')
     r = d.get('receiver_id')
     t = d.get('text')
+    client_time = d.get('time')
     
     if not s or not r or not t:
         return jsonify({"status": "error"}), 400
@@ -65,7 +66,8 @@ def send_message():
         "sender_id": s,
         "receiver_id": r,
         "text": t,
-        "time": datetime.datetime.now().strftime("%H:%M")
+        "time": client_time if client_time else datetime.datetime.now().strftime("%H:%M"),
+        "status": "delivered"
     }
     messages.append(msg)
     return jsonify({"status": "success", "message": msg}), 201
@@ -75,6 +77,11 @@ def get_messages():
     u1 = request.args.get('user1')
     u2 = request.args.get('user2')
     
+    # Sohbet penceresi açıkken karşı tarafın mesajlarını okundu yap
+    for m in messages:
+        if m['sender_id'] == u2 and m['receiver_id'] == u1:
+            m['status'] = 'read'
+
     conv = [m for m in messages if (m['sender_id'] == u1 and m['receiver_id'] == u2) or (m['sender_id'] == u2 and m['receiver_id'] == u1)]
     return jsonify({"messages": conv}), 200
 
