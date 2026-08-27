@@ -19,6 +19,9 @@ def register():
     username = d.get('username', '').strip()
     password = d.get('password', '')
 
+    if not email or not password:
+        return jsonify({"status": "error", "message": "E-posta ve sifre zorunludur"}), 400
+
     if any(u['email'] == email for u in users):
         return jsonify({"status": "error", "message": "Bu e-posta zaten kayitli"}), 400
 
@@ -59,7 +62,7 @@ def send_message():
     client_time = d.get('time')
     
     if not s or not r or not t:
-        return jsonify({"status": "error"}), 400
+        return jsonify({"status": "error", "message": "Eksik parametre"}), 400
 
     msg = {
         "id": str(uuid.uuid4()),
@@ -77,12 +80,18 @@ def get_messages():
     u1 = request.args.get('user1')
     u2 = request.args.get('user2')
     
-    # Sohbet penceresi açıkken karşı tarafın mesajlarını okundu yap
+    if not u1 or not u2:
+        return jsonify({"messages": []}), 200
+
     for m in messages:
-        if m['sender_id'] == u2 and m['receiver_id'] == u1:
+        if m.get('sender_id') == u2 and m.get('receiver_id') == u1:
             m['status'] = 'read'
 
-    conv = [m for m in messages if (m['sender_id'] == u1 and m['receiver_id'] == u2) or (m['sender_id'] == u2 and m['receiver_id'] == u1)]
+    conv = [
+        m for m in messages 
+        if (m.get('sender_id') == u1 and m.get('receiver_id') == u2) or 
+           (m.get('sender_id') == u2 and m.get('receiver_id') == u1)
+    ]
     return jsonify({"messages": conv}), 200
 
 if __name__ == '__main__':
