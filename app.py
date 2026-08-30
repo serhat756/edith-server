@@ -96,3 +96,12 @@ def get_messages():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
+
+APP_LATEST_VERSION = "1.0.0"
+
+@app.route('/api/version', methods=['GET'])
+def get_version():
+    return jsonify({
+        "version": APP_LATEST_VERSION,
+        "update_url": "https://raw.githubusercontent.com/KULLANICI_ADIN/REPO_ADIN/main/edith_ui.py"
+    }), 200
